@@ -430,53 +430,93 @@ trained_model = training(
 # DataParallel 래퍼 해제
 model = trained_model.module if hasattr(trained_model, 'module') else trained_model
 
-# ─── Cell 5: forward()만 떼서 전력 측정 ───
+# ─── Cell 5: 전력 측정(가능한 것 / 불가능한 것 명확화) ───
 import time
 import pynvml
 import torch
-from IPython.display import display
 
-# 1) NVML 초기화 & 파워 리더 함수
-pynvml.nvmlInit()
-_handle = pynvml.nvmlDeviceGetHandleByIndex(0)
-def get_gpu_power():
-    return pynvml.nvmlDeviceGetPowerUsage(_handle) / 1000.0  # mW → W
 
-device = next(model.parameters()).device  # 모델이 올라간 디바이스
+def measure_gpu_inference_energy_nvml(model, loader, repeats=30, warmup=10, sample_dt=0.005):
+    """
+    주의: 이 함수는 "실제 회로 전력"이 아니라, GPU 보드 전력 기반 추정치만 제공합니다.
+    (NVML은 GPU 전체 보드 전력을 읽음)
+    """
+    if not torch.cuda.is_available():
+        raise RuntimeError("CUDA 환경이 아니므로 NVML 기반 GPU 전력 측정을 수행할 수 없습니다.")
 
-# 2) 한 배치만 뽑아서 미리 GPU에 올려두기
-batch, _ = next(iter(test_loader))
-batch = batch.to(device, non_blocking=True)
+    pynvml.nvmlInit()
+    handle = pynvml.nvmlDeviceGetHandleByIndex(0)
 
-# 3) idle baseline 전력 측정 (GPU 연산 대기 상태)
-idle_samples = []
-for _ in range(20):         # 20번 샘플링
-    idle_samples.append(get_gpu_power())
-    time.sleep(0.01)        # 10ms 간격
-idle_power = sum(idle_samples) / len(idle_samples)
+    def read_power_w():
+        return pynvml.nvmlDeviceGetPowerUsage(handle) / 1000.0  # mW -> W
 
-# 4) forward 전/후 전력 샘플링
-torch.cuda.synchronize()
-p0 = get_gpu_power()
-t0 = time.time()
+    device = next(model.parameters()).device
+    batch, _ = next(iter(loader))
+    batch = batch.to(device, non_blocking=True)
 
-# 순수 연산
-_ = model(batch)
+    # 1) 워밍업
+    model.eval()
+    with torch.no_grad():
+        for _ in range(warmup):
+            _ = model(batch)
+        torch.cuda.synchronize()
 
-torch.cuda.synchronize()
-t1 = time.time()
-p1 = get_gpu_power()
+    # 2) idle baseline
+    idle_samples = []
+    for _ in range(max(20, int(1.0 / sample_dt))):
+        idle_samples.append(read_power_w())
+        time.sleep(sample_dt)
+    idle_power = sum(idle_samples) / len(idle_samples)
 
-# 5) 에너지 계산 (W·s → J)
-energy = ((p0 + p1)/2 - idle_power) * (t1 - t0)
-print(f"한 배치({batch.size(0)}개) 순수 forward 에너지: {energy:.6f} J")
+    # 3) 반복 측정 (시간축 적분으로 에너지 계산)
+    energies = []
+    with torch.no_grad():
+        for _ in range(repeats):
+            power_trace = []
+            t_start = time.time()
+            _ = model(batch)
+            torch.cuda.synchronize()
+            t_end = time.time()
 
-# 6) 샘플당 에너지
-per_sample = energy / batch.size(0)
-print(f"샘플당 에너지: {per_sample*1e3:.3f} mJ")
+            # 연산 구간 동안 다중 샘플링 (짧은 추론이면 최소 2점 확보)
+            n_probe = max(2, int((t_end - t_start) / sample_dt) + 1)
+            for _ in range(n_probe):
+                power_trace.append(read_power_w())
+                time.sleep(sample_dt)
 
-# 7) 결과 표시
-print(f"  p0={p0:.3f} W, p1={p1:.3f} W, idle={idle_power:.3f} W, Δt={t1-t0:.4f} s")
+            dyn_power = max(0.0, (sum(power_trace) / len(power_trace)) - idle_power)
+            energy_j = dyn_power * (t_end - t_start)
+            energies.append(energy_j)
+
+    mean_energy = float(sum(energies) / len(energies))
+    per_sample_mj = mean_energy / batch.size(0) * 1e3
+
+    print("[NVML] GPU 보드 전력 기반 추정치")
+    print(f"- idle power: {idle_power:.3f} W")
+    print(f"- mean forward energy / batch: {mean_energy:.6f} J")
+    print(f"- mean energy / sample: {per_sample_mj:.3f} mJ")
+
+    return {
+        "idle_power_w": idle_power,
+        "mean_energy_j_per_batch": mean_energy,
+        "mean_energy_mj_per_sample": per_sample_mj,
+        "repeats": repeats,
+        "batch_size": int(batch.size(0)),
+    }
+
+
+def measure_real_circuit_power(*args, **kwargs):
+    """
+    실제 회로 전력 측정은 이 파이썬 코드만으로는 불가능.
+    (보드/칩 계측 장비 API, shunt/DAQ, 오실로스코프 등 외부 계측 연동이 필요)
+    """
+    raise NotImplementedError(
+        "실제 회로 전력 측정은 외부 계측 하드웨어 연동 없이는 코드만으로 구현할 수 없습니다."
+    )
+
+
+# 사용 예시: GPU 추정 전력(회로 전력 아님)
+gpu_power_result = measure_gpu_inference_energy_nvml(model, test_loader)
 
 """#본 논문에서 제안하는 구조
 (GroupNorm,
