@@ -21,18 +21,15 @@ References in source:
 ```text
 SNN-wafer-2025-/
 ├── README.md
-├── REPO_OVERVIEW.md
 ├── wafer2spike_structured_notebook_ipynb(05_22_최종_제출본).py
-└── 나노소자_project2_Q2_.ipynb
+├── wafer2spike_original_train_test.py
+├── wafer2spike_improved_train_test.py
 ```
 
 ### File roles
 
 - **`README.md`**
   - Comprehensive technical documentation for this repository.
-
-- **`REPO_OVERVIEW.md`**
-  - Short high-level summary of top-level artifacts.
 
 - **`wafer2spike_structured_notebook_ipynb(05_22_최종_제출본).py`**
   - Primary SNN project code (exported Colab notebook).
@@ -46,8 +43,14 @@ SNN-wafer-2025-/
     - training/validation/test logic, confusion matrix/report,
     - experimental blocks for alternate architecture/hyperparameters.
 
-- **`나노소자_project2_Q2_.ipynb`**
-  - Separate semiconductor-device analysis notebook (Vth/DIBL extraction and fitting); not the core wafer SNN training pipeline.
+
+- **`wafer2spike_original_train_test.py`**
+  - Original Wafer2Spike-style block을 독립 실행 가능하게 분리한 파일.
+  - 기존 전처리 + original 모델/학습/테스트 루프를 단독으로 포함.
+
+- **`wafer2spike_improved_train_test.py`**
+  - GroupNorm + Fast-Sigmoid 개선 블록을 독립 실행 가능하게 분리한 파일.
+  - 기존 전처리 + improved 모델/학습/테스트 루프를 단독으로 포함.
 
 ---
 
@@ -142,4 +145,3 @@ Two training pipelines appear in the script (baseline and improved).
 
 - The main script is an exported notebook and includes multiple experimental blocks sequentially; it is not yet modularized as a package.
 - Paths are Colab/Drive-specific and should be parameterized for local or production runs.
-- The repository also contains non-SNN semiconductor analysis content (`나노소자_project2_Q2_.ipynb`) that is conceptually separate from wafer defect classification training.
