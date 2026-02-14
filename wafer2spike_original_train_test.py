@@ -10,6 +10,7 @@ import pandas as pd
 import cv2
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
 from torch.utils.data import Dataset, DataLoader
 from torchvision import transforms
 from sklearn.model_selection import train_test_split
@@ -62,36 +63,45 @@ class PseudoGradSpikeWithDropout(torch.autograd.Function):
         return Cg * grad_input * spike_pseudo_grad.float(), None, None, None
 
 
-class CurrentBasedLIF(nn.Module):
+class CurrentBasedGLIF(nn.Module):
+    """GLIF/ALIF neuron: learnable multi-timescale current + adaptive threshold."""
     def __init__(self, func_v, pseudo_grad_ops, param):
-        super(CurrentBasedLIF, self).__init__()
+        super(CurrentBasedGLIF, self).__init__()
         self.func_v = func_v
         self.pseudo_grad_ops = pseudo_grad_ops
         self.w_scdecay, self.w_vdecay, self.vth, self.cw = param
+        self.w_adapt_decay = nn.Parameter(torch.tensor(0.8))
+        self.w_adapt_scale = nn.Parameter(torch.tensor(0.1))
 
     def forward(self, input_data, state):
-        pre_spike, pre_current, pre_volt = state
+        pre_spike, pre_current, pre_volt, pre_adapt = state
         current = self.w_scdecay * pre_current + self.func_v(input_data)
+        adapt = torch.sigmoid(self.w_adapt_decay) * pre_adapt + pre_spike
+        vth_eff = self.vth + F.softplus(self.w_adapt_scale) * adapt
         volt = self.w_vdecay * pre_volt * (1. - pre_spike) + current
-        output = self.pseudo_grad_ops(volt, self.vth, self.cw)
-        return output, (output, current, volt)
+        output = self.pseudo_grad_ops(volt, vth_eff, self.cw)
+        return output, (output, current, volt, adapt)
 
 
-class CurrentBasedLIFWithDropout(nn.Module):
+class CurrentBasedGLIFWithDropout(nn.Module):
     def __init__(self, func_v, pseudo_grad_ops, param):
-        super(CurrentBasedLIFWithDropout, self).__init__()
+        super(CurrentBasedGLIFWithDropout, self).__init__()
         self.func_v = func_v
         self.pseudo_grad_ops = pseudo_grad_ops
         self.w_scdecay, self.w_vdecay, self.vth, self.cw = param
+        self.w_adapt_decay = nn.Parameter(torch.tensor(0.8))
+        self.w_adapt_scale = nn.Parameter(torch.tensor(0.1))
 
     def forward(self, input_data, state, mask, train):
-        pre_spike, pre_current, pre_volt = state
+        pre_spike, pre_current, pre_volt, pre_adapt = state
         current = self.w_scdecay * pre_current + self.func_v(input_data)
         if train is True:
             current = current * mask
+        adapt = torch.sigmoid(self.w_adapt_decay) * pre_adapt + pre_spike
+        vth_eff = self.vth + F.softplus(self.w_adapt_scale) * adapt
         volt = self.w_vdecay * pre_volt * (1. - pre_spike) + current
-        output = self.pseudo_grad_ops(volt, self.vth, self.cw, mask)
-        return output, (output, current, volt)
+        output = self.pseudo_grad_ops(volt, vth_eff, self.cw, mask)
+        return output, (output, current, volt, adapt)
 
 
 class Wafer2Spike(nn.Module):
@@ -119,16 +129,16 @@ class Wafer2Spike(nn.Module):
 
         self.w_t = nn.Parameter(torch.ones((self.spike_ts), device=self.device) / self.spike_ts)
 
-        self.conv_spk_enc = CurrentBasedLIF(nn.Conv2d(1, 64, (7, 7), stride=1, bias=True), pseudo_grad_ops,
+        self.conv_spk_enc = CurrentBasedGLIF(nn.Conv2d(1, 64, (7, 7), stride=1, bias=True), pseudo_grad_ops,
                                             [self.conv_spk_enc_w_scdecay, self.conv_spk_enc_w_vdecay, self.vth, self.cw])
 
-        self.Spk_conv1 = CurrentBasedLIF(nn.Conv2d(64, 64, (7, 7), stride=2, bias=True), pseudo_grad_ops,
+        self.Spk_conv1 = CurrentBasedGLIF(nn.Conv2d(64, 64, (7, 7), stride=2, bias=True), pseudo_grad_ops,
                                          [self.Spk_conv1_w_scdecay, self.Spk_conv1_w_vdecay, self.vth, self.cw])
 
-        self.Spk_conv2 = CurrentBasedLIF(nn.Conv2d(64, 64, (7, 7), stride=2, bias=True), pseudo_grad_ops,
+        self.Spk_conv2 = CurrentBasedGLIF(nn.Conv2d(64, 64, (7, 7), stride=2, bias=True), pseudo_grad_ops,
                                          [self.Spk_conv2_w_scdecay, self.Spk_conv2_w_vdecay, self.vth, self.cw])
 
-        self.Spk_fc = CurrentBasedLIFWithDropout(nn.Linear(64 * 9, 256 * 9, bias=True), pseudo_grad_ops_with_dropout,
+        self.Spk_fc = CurrentBasedGLIFWithDropout(nn.Linear(64 * 9, 256 * 9, bias=True), pseudo_grad_ops_with_dropout,
                                                  [self.Spk_fc_w_scdecay, self.Spk_fc_w_vdecay, self.vth, self.cw])
 
         self.nonSpk_fc = nn.Linear(256 * 9, numClasses)
@@ -166,10 +176,10 @@ class CurrentBasedSNN(nn.Module):
     def forward(self, input_data):
         batch_size = input_data.shape[0]
 
-        conv_spk_enc_state = tuple(torch.zeros(batch_size, 64, 30, 30, device=self.device) for _ in range(3))
-        Spk_conv1_state = tuple(torch.zeros(batch_size, 64, 12, 12, device=self.device) for _ in range(3))
-        Spk_conv2_state = tuple(torch.zeros(batch_size, 64, 3, 3, device=self.device) for _ in range(3))
-        Spk_fc_state = tuple(torch.zeros(batch_size, 256 * 9, device=self.device) for _ in range(3))
+        conv_spk_enc_state = tuple(torch.zeros(batch_size, 64, 30, 30, device=self.device) for _ in range(4))
+        Spk_conv1_state = tuple(torch.zeros(batch_size, 64, 12, 12, device=self.device) for _ in range(4))
+        Spk_conv2_state = tuple(torch.zeros(batch_size, 64, 3, 3, device=self.device) for _ in range(4))
+        Spk_fc_state = tuple(torch.zeros(batch_size, 256 * 9, device=self.device) for _ in range(4))
 
         states = (conv_spk_enc_state, Spk_conv1_state, Spk_conv2_state, Spk_fc_state)
         return self.wafer2spike(input_data, states)

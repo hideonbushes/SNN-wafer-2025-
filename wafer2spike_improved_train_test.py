@@ -10,6 +10,7 @@ import pandas as pd
 import cv2
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
 from torch.utils.data import Dataset, DataLoader
 from torchvision import transforms
 from sklearn.model_selection import train_test_split
@@ -40,44 +41,53 @@ class FastSigmoidSurrogate(torch.autograd.Function):
         return grad_output * grad, None, None
 
 
-class CurrentBasedLIF(nn.Module):
+class CurrentBasedGLIF(nn.Module):
+    """GLIF/ALIF neuron with adaptive threshold in GroupNorm-based block."""
     def __init__(self, conv_or_linear, bn_layer, surrogate, param):
-        super(CurrentBasedLIF, self).__init__()
+        super(CurrentBasedGLIF, self).__init__()
         self.layer = conv_or_linear
         self.bn = bn_layer
         self.surrogate = surrogate.apply
         self.w_scdecay, self.w_vdecay, self.vth, self.alpha = param
+        self.w_adapt_decay = nn.Parameter(torch.tensor(0.8))
+        self.w_adapt_scale = nn.Parameter(torch.tensor(0.1))
 
     def forward(self, input_data, state):
-        pre_spike, pre_current, pre_volt = state
+        pre_spike, pre_current, pre_volt, pre_adapt = state
         x = self.layer(input_data)
         x = self.bn(x)
         x = torch.relu(x)
         current = self.w_scdecay * pre_current + x
+        adapt = torch.sigmoid(self.w_adapt_decay) * pre_adapt + pre_spike
+        vth_eff = self.vth + F.softplus(self.w_adapt_scale) * adapt
         volt = self.w_vdecay * pre_volt * (1. - pre_spike) + current
-        output = self.surrogate(volt, self.vth, self.alpha)
-        return output, (output, current, volt)
+        output = self.surrogate(volt, vth_eff, self.alpha)
+        return output, (output, current, volt, adapt)
 
 
-class CurrentBasedLIFWithDropout(nn.Module):
+class CurrentBasedGLIFWithDropout(nn.Module):
     def __init__(self, linear, bn_layer, surrogate, param):
-        super(CurrentBasedLIFWithDropout, self).__init__()
+        super(CurrentBasedGLIFWithDropout, self).__init__()
         self.layer = linear
         self.bn = bn_layer
         self.surrogate = surrogate.apply
         self.w_scdecay, self.w_vdecay, self.vth, self.alpha = param
+        self.w_adapt_decay = nn.Parameter(torch.tensor(0.8))
+        self.w_adapt_scale = nn.Parameter(torch.tensor(0.1))
 
     def forward(self, input_data, state, mask, train):
-        pre_spike, pre_current, pre_volt = state
+        pre_spike, pre_current, pre_volt, pre_adapt = state
         x = self.layer(input_data)
         x = self.bn(x)
         x = torch.relu(x)
         if train:
             x = x * mask
         current = self.w_scdecay * pre_current + x
+        adapt = torch.sigmoid(self.w_adapt_decay) * pre_adapt + pre_spike
+        vth_eff = self.vth + F.softplus(self.w_adapt_scale) * adapt
         volt = self.w_vdecay * pre_volt * (1. - pre_spike) + current
-        output = self.surrogate(volt, self.vth, self.alpha)
-        return output, (output, current, volt)
+        output = self.surrogate(volt, vth_eff, self.alpha)
+        return output, (output, current, volt, adapt)
 
 
 class Wafer2Spike(nn.Module):
@@ -100,13 +110,13 @@ class Wafer2Spike(nn.Module):
         fc_lin = nn.Linear(64 * 9, 256 * 9, bias=True).to(device)
         gn_fc = nn.GroupNorm(num_groups=32, num_channels=256 * 9).to(device)
 
-        self.conv_spk_enc = CurrentBasedLIF(conv_or_linear=conv_enc, bn_layer=gn_enc,
+        self.conv_spk_enc = CurrentBasedGLIF(conv_or_linear=conv_enc, bn_layer=gn_enc,
                                             surrogate=FastSigmoidSurrogate, param=params)
-        self.Spk_conv1 = CurrentBasedLIF(conv_or_linear=conv1, bn_layer=gn1,
+        self.Spk_conv1 = CurrentBasedGLIF(conv_or_linear=conv1, bn_layer=gn1,
                                          surrogate=FastSigmoidSurrogate, param=params)
-        self.Spk_conv2 = CurrentBasedLIF(conv_or_linear=conv2, bn_layer=gn2,
+        self.Spk_conv2 = CurrentBasedGLIF(conv_or_linear=conv2, bn_layer=gn2,
                                          surrogate=FastSigmoidSurrogate, param=params)
-        self.Spk_fc = CurrentBasedLIFWithDropout(linear=fc_lin, bn_layer=gn_fc,
+        self.Spk_fc = CurrentBasedGLIFWithDropout(linear=fc_lin, bn_layer=gn_fc,
                                                  surrogate=FastSigmoidSurrogate, param=params)
 
         self.w_t = nn.Parameter(torch.ones(self.spike_ts, device=device) / self.spike_ts)
@@ -117,7 +127,7 @@ class Wafer2Spike(nn.Module):
         if states is None:
             states = []
             for dims in [(64, 30, 30), (64, 12, 12), (64, 3, 3), (256 * 9,)]:
-                states.append(tuple(torch.zeros(batch, *dims, device=self.device) for _ in range(3)))
+                states.append(tuple(torch.zeros(batch, *dims, device=self.device) for _ in range(4)))
 
         mask_fc = Bernoulli(torch.full((batch, 256 * 9), 1 - self.dropout_fc, device=self.device)).sample() / (1 - self.dropout_fc)
 
