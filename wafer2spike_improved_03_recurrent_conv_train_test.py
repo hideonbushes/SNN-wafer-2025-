@@ -13,7 +13,7 @@ class RecurrentSpikingBlock(nn.Module):
     def __init__(self, in_ch, out_ch, stride, params):
         super().__init__()
         self.ff = CurrentBasedGLIF(nn.Conv2d(in_ch, out_ch, 7, stride=stride, bias=True), nn.GroupNorm(8, out_ch), FastSigmoidSurrogate, params)
-        self.rec = nn.Conv2d(out_ch, out_ch, 3, stride=1, padding=1, bias=False)
+        self.rec = nn.Conv2d(out_ch, in_ch, 3, stride=1, padding=1, bias=False)
 
     def forward(self, x, state, h_prev):
         rec = self.rec(h_prev)

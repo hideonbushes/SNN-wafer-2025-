@@ -14,7 +14,7 @@ class RecurrentSpikingBlock(nn.Module):
         super().__init__()
         pseudo = PseudoGradSpike.apply
         self.ff = CurrentBasedGLIF(nn.Conv2d(in_ch, out_ch, 7, stride=stride, bias=True), pseudo, params)
-        self.rec = nn.Conv2d(out_ch, out_ch, 3, stride=1, padding=1, bias=False)
+        self.rec = nn.Conv2d(out_ch, in_ch, 3, stride=1, padding=1, bias=False)
 
     def forward(self, x, state, h_prev):
         rec = self.rec(h_prev)
