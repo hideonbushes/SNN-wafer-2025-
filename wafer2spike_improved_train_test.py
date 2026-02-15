@@ -319,7 +319,7 @@ def training(network,
         {'params': thr_params, 'weight_decay': alpha_wd}
     ], lr=lr)
 
-    scheduler = ReduceLROnPlateau(optimizer, mode='max', factor=0.5, patience=patience_lr, verbose=True)
+    scheduler = ReduceLROnPlateau(optimizer, mode='max', factor=0.5, patience=patience_lr)
     best_val_acc, es_count = 0.0, 0
 
     for epoch in range(1, epochs + 1):
@@ -340,7 +340,11 @@ def training(network,
         print(f"Epoch {epoch}/{epochs} — Train Loss: {tr_loss:.4f}, Train Acc: {tr_acc:.4f}")
 
         val_acc = test_accuracy(model, val_loader, criterion, device, phase="Validation")
+        prev_lrs = [group['lr'] for group in optimizer.param_groups]
         scheduler.step(val_acc)
+        new_lrs = [group['lr'] for group in optimizer.param_groups]
+        if any(abs(a - b) > 1e-12 for a, b in zip(prev_lrs, new_lrs)):
+            print(f"[LR Scheduler] reduced learning rate: {prev_lrs} -> {new_lrs}")
         if val_acc > best_val_acc:
             best_val_acc, es_count = val_acc, 0
         else:
