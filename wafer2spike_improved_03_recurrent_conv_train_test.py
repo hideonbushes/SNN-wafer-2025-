@@ -1,6 +1,7 @@
 """03) Improved + Recurrent spatio-temporal Conv-GLIF blocks."""
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
 from torch.distributions.bernoulli import Bernoulli
 from wafer2spike_improved_train_test import (
     build_dataloaders, training, FastSigmoidSurrogate,
@@ -15,7 +16,10 @@ class RecurrentSpikingBlock(nn.Module):
         self.rec = nn.Conv2d(out_ch, out_ch, 3, stride=1, padding=1, bias=False)
 
     def forward(self, x, state, h_prev):
-        x = x + self.rec(h_prev)
+        rec = self.rec(h_prev)
+        if rec.shape[-2:] != x.shape[-2:]:
+            rec = F.adaptive_avg_pool2d(rec, x.shape[-2:])
+        x = x + rec
         spk, state = self.ff(x, state)
         return spk, state, spk
 
