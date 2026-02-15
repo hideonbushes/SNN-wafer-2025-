@@ -20,8 +20,8 @@ class Wafer2SpikeResidual(nn.Module):
         self.block1 = CurrentBasedGLIF(nn.Conv2d(64, 64, 7, stride=2, bias=True), nn.GroupNorm(8, 64), FastSigmoidSurrogate, params)
         self.block2 = CurrentBasedGLIF(nn.Conv2d(64, 64, 7, stride=2, bias=True), nn.GroupNorm(8, 64), FastSigmoidSurrogate, params)
 
-        self.skip1 = nn.Conv2d(64, 64, 1, stride=2, bias=False)
-        self.skip2 = nn.Conv2d(64, 64, 1, stride=2, bias=False)
+        self.skip1 = nn.Conv2d(64, 64, 7, stride=2, bias=False)
+        self.skip2 = nn.Conv2d(64, 64, 7, stride=2, bias=False)
 
         self.fc = CurrentBasedGLIFWithDropout(nn.Linear(64 * 9, 256 * 9, bias=True), nn.GroupNorm(32, 256 * 9), FastSigmoidSurrogate, params)
         self.head = nn.Linear(256 * 9, numClasses)
@@ -29,6 +29,7 @@ class Wafer2SpikeResidual(nn.Module):
 
     def _zero_state(self, b, d):
         return tuple(torch.zeros(b, *d, device=self.device) for _ in range(4))
+
 
     def forward(self, x):
         b = x.size(0)

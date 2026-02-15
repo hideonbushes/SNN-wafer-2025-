@@ -41,18 +41,30 @@ class Tee:
             s.flush()
 
 
-def run_one(exp: Dict, dataloaders, log_dir: str):
+def run_one(exp: Dict, dataloaders, log_dir: str) -> Dict[str, str]:
     exp_name = exp["name"]
     log_path = os.path.join(log_dir, f"{exp_name}.log")
     print(f"\n===== Running: {exp_name} =====")
     print(f"Log file: {log_path}")
 
+    status = "success"
+    message = ""
     with open(log_path, "w", encoding="utf-8") as f:
         tee = Tee(os.sys.stdout, f)
         with contextlib.redirect_stdout(tee), contextlib.redirect_stderr(tee):
-            exp["runner"](dataloaders)
+            try:
+                exp["runner"](dataloaders)
+            except Exception as exc:
+                status = "failed"
+                message = f"{type(exc).__name__}: {exc}"
+                print(f"[ERROR] {exp_name} failed - {message}")
 
-    print(f"===== Done: {exp_name} =====")
+    if status == "success":
+        print(f"===== Done: {exp_name} =====")
+    else:
+        print(f"===== Failed: {exp_name} =====")
+
+    return {"name": exp_name, "status": status, "message": message, "log": log_path}
 
 
 def main():
@@ -162,11 +174,25 @@ def main():
         for exp in experiments:
             sf.write(f"- {exp['name']}\n")
 
+    results = []
     for exp in experiments:
-        run_one(exp, dataloaders, log_dir)
+        results.append(run_one(exp, dataloaders, log_dir))
 
+    with open(summary_path, "a", encoding="utf-8") as sf:
+        sf.write("\nresults:\n")
+        for res in results:
+            if res["status"] == "success":
+                sf.write(f"- {res['name']}: success\n")
+            else:
+                sf.write(f"- {res['name']}: failed ({res['message']})\n")
+
+    failed = [r for r in results if r["status"] == "failed"]
     print("\nAll selected experiments completed.")
     print(f"Summary: {summary_path}")
+    if failed:
+        print("Failed experiments:")
+        for r in failed:
+            print(f"- {r['name']}: {r['message']} (log: {r['log']})")
 
 
 if __name__ == "__main__":
