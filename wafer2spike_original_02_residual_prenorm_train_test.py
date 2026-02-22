@@ -78,4 +78,6 @@ class CurrentBasedSNNResidualBernoulli(CurrentBasedSNNResidual):
 
 if __name__ == "__main__":
     dataloaders = build_dataloaders()
-    training(network=CurrentBasedSNNResidualBernoulli, params=[0.05, 0.10, 0.08, 0.30], dataloaders=dataloaders)
+    use_bernoulli_encoding = True
+    network_cls = CurrentBasedSNNResidualBernoulli if use_bernoulli_encoding else CurrentBasedSNNResidual
+    training(network=network_cls, params=[0.05, 0.10, 0.08, 0.30], dataloaders=dataloaders)
