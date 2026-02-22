@@ -200,6 +200,10 @@ def main():
             "runner": lambda dl: original_training(network=OriginalResidualBernoulli, params=[0.05, 0.10, 0.08, 0.30], dataloaders=dl, return_metrics=True),
         },
         {
+            "name": "original_02_residual_prenorm_bernoulli",
+            "runner": lambda dl: original_training(network=OriginalResidualBernoulli, params=[0.05, 0.10, 0.08, 0.30], dataloaders=dl),
+        },
+        {
             "name": "improved_02_residual_prenorm",
             "runner": lambda dl: improved_training(
                 network=ImprovedResidual,
