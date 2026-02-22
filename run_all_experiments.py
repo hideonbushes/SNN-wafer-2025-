@@ -19,7 +19,10 @@ from wafer2spike_improved_train_test import (
     training as improved_training,
     CurrentBasedSNN as ImprovedBase,
 )
-from wafer2spike_original_02_residual_prenorm_train_test import CurrentBasedSNNResidual as OriginalResidual
+from wafer2spike_original_02_residual_prenorm_train_test import (
+    CurrentBasedSNNResidual as OriginalResidual,
+    CurrentBasedSNNResidualBernoulli as OriginalResidualBernoulli,
+)
 from wafer2spike_improved_02_residual_prenorm_train_test import CurrentBasedSNNResidual as ImprovedResidual
 from wafer2spike_original_03_recurrent_conv_train_test import CurrentBasedSNNRecurrent as OriginalRecurrent
 from wafer2spike_improved_03_recurrent_conv_train_test import CurrentBasedSNNRecurrent as ImprovedRecurrent
@@ -106,8 +109,12 @@ def main():
             ),
         },
         {
-            "name": "original_02_residual_prenorm",
+            "name": "original_02_residual_prenorm_constant",
             "runner": lambda dl: original_training(network=OriginalResidual, params=[0.05, 0.10, 0.08, 0.30], dataloaders=dl),
+        },
+        {
+            "name": "original_02_residual_prenorm_bernoulli",
+            "runner": lambda dl: original_training(network=OriginalResidualBernoulli, params=[0.05, 0.10, 0.08, 0.30], dataloaders=dl),
         },
         {
             "name": "improved_02_residual_prenorm",
