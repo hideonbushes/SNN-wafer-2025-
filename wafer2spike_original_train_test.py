@@ -315,12 +315,14 @@ def test_accuracy(model, loader, criterion, device, phase="Validation"):
     acc = correct / len(loader.dataset)
     print(f"{phase} Loss: {avg_loss:.4f}, {phase} Acc: {acc:.4f}")
     model.train()
+    return avg_loss, acc
 
 
 def training(network, params,
              batch_size=256, epochs=10, lr=1e-4,
              dataloaders=None, numClasses=9,
-             spike_ts=10, dropout_fc=0.3):
+             spike_ts=10, dropout_fc=0.3,
+             return_metrics=False):
     train_loader, val_loader, test_loader = dataloaders
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     wafer2spike_snn = network(numClasses, dropout_fc, spike_ts, device, params=params)
@@ -348,6 +350,9 @@ def training(network, params,
         lr=lr
     )
 
+    train_loss_history, train_acc_history = [], []
+    val_loss_history, val_acc_history = [], []
+
     for epoch in range(1, epochs + 1):
         model.train()
         loss_sum, correct = 0.0, 0
@@ -366,11 +371,15 @@ def training(network, params,
 
         train_loss = loss_sum / len(train_loader.dataset)
         train_acc = correct / len(train_loader.dataset)
+        train_loss_history.append(train_loss)
+        train_acc_history.append(train_acc)
         print(f"Epoch {epoch}/{epochs} — Train Loss: {train_loss:.4f}, Train Acc: {train_acc:.4f}")
 
-        test_accuracy(model, val_loader, criterion, device, phase="Validation")
+        val_loss, val_acc = test_accuracy(model, val_loader, criterion, device, phase="Validation")
+        val_loss_history.append(val_loss)
+        val_acc_history.append(val_acc)
 
-    test_accuracy(model, test_loader, criterion, device, phase="Test")
+    test_loss, test_acc = test_accuracy(model, test_loader, criterion, device, phase="Test")
 
     preds, trues = [], []
     with torch.no_grad():
@@ -380,8 +389,23 @@ def training(network, params,
             trues.extend(label.cpu().tolist())
 
     print("\nConfusion Matrix:")
-    print(confusion_matrix(trues, preds))
+    cm = confusion_matrix(trues, preds)
+    print(cm)
     print(classification_report(trues, preds))
+
+    if return_metrics:
+        return {
+            "model": model,
+            "preds": preds,
+            "trues": trues,
+            "confusion_matrix": cm,
+            "test_loss": test_loss,
+            "test_acc": test_acc,
+            "train_loss_history": train_loss_history,
+            "train_acc_history": train_acc_history,
+            "val_loss_history": val_loss_history,
+            "val_acc_history": val_acc_history,
+        }
     return model
 
 
