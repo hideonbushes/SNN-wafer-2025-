@@ -9,12 +9,13 @@ from wafer2spike_original_train_test import (
 
 
 class Wafer2SpikeResidual(nn.Module):
-    def __init__(self, numClasses, dropout_fc, spike_ts, device, params):
+    def __init__(self, numClasses, dropout_fc, spike_ts, device, params, input_encoding="constant"):
         super().__init__()
         self.device = device
         self.spike_ts = spike_ts
         self.dropout_fc = dropout_fc
         self.scdecay, self.vdecay, self.vth, self.cw = params
+        self.input_encoding = input_encoding
 
         pseudo = PseudoGradSpike.apply
         pseudo_do = PseudoGradSpikeWithDropout.apply
@@ -33,6 +34,11 @@ class Wafer2SpikeResidual(nn.Module):
     def _zero_state(self, b, d):
         return tuple(torch.zeros(b, *d, device=self.device) for _ in range(4))
 
+    def _encode_temporal_input(self, x):
+        if self.input_encoding == "bernoulli":
+            prob = torch.sigmoid(x)
+            return torch.bernoulli(prob)
+        return x
 
     def forward(self, x):
         b = x.size(0)
@@ -44,7 +50,8 @@ class Wafer2SpikeResidual(nn.Module):
         mask_fc = Bernoulli(torch.full((b, 256 * 9), 1 - self.dropout_fc, device=self.device)).sample() / (1 - self.dropout_fc)
         outs = []
         for t in range(self.spike_ts):
-            h0, s_stem = self.stem(x, s_stem)
+            x_t = self._encode_temporal_input(x)
+            h0, s_stem = self.stem(x_t, s_stem)
             h1, s_b1 = self.block1(h0, s_b1)
             h1 = h1 + self.skip1(h0)
             h2, s_b2 = self.block2(h1, s_b2)
@@ -56,14 +63,19 @@ class Wafer2SpikeResidual(nn.Module):
 
 
 class CurrentBasedSNNResidual(nn.Module):
-    def __init__(self, numClasses, dropout_fc, spike_ts, device, params):
+    def __init__(self, numClasses, dropout_fc, spike_ts, device, params, input_encoding="constant"):
         super().__init__()
-        self.net = Wafer2SpikeResidual(numClasses, dropout_fc, spike_ts, device, params)
+        self.net = Wafer2SpikeResidual(numClasses, dropout_fc, spike_ts, device, params, input_encoding=input_encoding)
 
     def forward(self, x):
         return self.net(x)
 
 
+class CurrentBasedSNNResidualBernoulli(CurrentBasedSNNResidual):
+    def __init__(self, numClasses, dropout_fc, spike_ts, device, params):
+        super().__init__(numClasses, dropout_fc, spike_ts, device, params, input_encoding="bernoulli")
+
+
 if __name__ == "__main__":
     dataloaders = build_dataloaders()
-    training(network=CurrentBasedSNNResidual, params=[0.05, 0.10, 0.08, 0.30], dataloaders=dataloaders)
+    training(network=CurrentBasedSNNResidualBernoulli, params=[0.05, 0.10, 0.08, 0.30], dataloaders=dataloaders)
