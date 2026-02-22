@@ -167,3 +167,73 @@ Two training pipelines appear in the script (baseline and improved).
 
 - The main script is an exported notebook and includes multiple experimental blocks sequentially; it is not yet modularized as a package.
 - Paths are Colab/Drive-specific and should be parameterized for local or production runs.
+
+---
+
+## 6) Local Git Bash Quick Commands (처음 설정용 + 매번 업데이트용)
+
+아래 명령은 **Windows 로컬 Git Bash** 기준으로, 바로 복붙해서 사용할 수 있는 최소 세트입니다.
+
+### A. 처음 1회 설정 (GitHub 연동)
+
+```bash
+# (0) Git 사용자 정보 설정 (최초 1회)
+git config --global user.name "YOUR_NAME"
+git config --global user.email "YOUR_EMAIL"
+
+# (1) 작업 폴더로 이동
+cd /c/path/to/your/workspace
+
+# (2) 원격 저장소 clone
+git clone https://github.com/<YOUR_ID>/SNN-wafer-2025-.git
+cd SNN-wafer-2025-
+
+# (3) 원격 확인
+git remote -v
+
+# (4) 기본 브랜치 최신화
+git checkout main
+git pull origin main
+```
+
+> SSH를 쓸 경우 `git clone git@github.com:<YOUR_ID>/SNN-wafer-2025-.git` 형태를 사용.
+
+### B. 매번 코드 수정 후 업데이트 (반복 루틴)
+
+```bash
+# (1) 저장소 폴더로 이동
+cd /c/path/to/your/workspace/SNN-wafer-2025-
+
+# (2) 최신 코드 당기기
+git checkout main
+git pull origin main
+
+# (3) 작업 브랜치 생성 (권장)
+git checkout -b feat/temporal-encoding-update
+
+# (4) 코드 수정 후 상태 확인
+git status
+
+# (5) 변경 파일 add + commit
+git add .
+git commit -m "feat: update temporal encoding experiment code"
+
+# (6) GitHub로 push
+git push -u origin feat/temporal-encoding-update
+```
+
+### C. Colab에서 최신 코드 실행
+
+```bash
+# Colab 셀 기준 (최초 1회)
+!git clone https://github.com/<YOUR_ID>/SNN-wafer-2025-.git
+%cd /content/SNN-wafer-2025-
+
+# 이후 세션/재실행 시
+!git pull origin main
+
+# 실행 예시
+!python wafer2spike_improved_train_test.py
+```
+
+실무에서는 로컬에서 commit/push를 먼저 완료하고, Colab에서는 clone/pull로 동기화한 뒤 실행하는 흐름을 권장합니다.
